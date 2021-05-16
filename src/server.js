@@ -12,22 +12,16 @@ const io = require("socket.io")(server, {
   },
 });
 const PORT = process.env.PORT;
-const { checkUser, removeUser } = require("./users.utils");
-const {
-  checkRoom,
-  checkIsOwner,
-  getPublicGames,
-  removeAllUsersFromRoom,
-  removeOnUserFromRoom,
-  addUserToRoom,
-  deleteRoom,
-} = require("./rooms.utils");
+const roomClass = require("./class/room.class");
+const gameClass = require("./class/game.class");
+const { checkUser, removeUser } = require("./utils/users.utils");
+const { getPublicGames } = require("./utils/rooms.utils");
 
 app.use(cors());
 
-// Store users and games in memory
+// Store users and rooms in memory
+let rooms = new Map();
 let usersList = [];
-let roomsList = [];
 
 // Retrieve data
 app.get("/api/users", (req, res) => {
@@ -35,16 +29,8 @@ app.get("/api/users", (req, res) => {
 });
 
 app.get("/api/games", (req, res) => {
-  const publicGames = getPublicGames(roomsList);
+  const publicGames = getPublicGames(rooms);
   res.send({ games: publicGames });
-});
-
-app.get("/api/game/:id", (req, res) => {
-  const { id } = req.params;
-  const game = checkRoom(id, roomsList);
-  if (game) res.status(404).send({ message: "Game not found" });
-  if (game.users.length >= 2) res.status(401).send({ message: "Game is full" });
-  res.send({ game });
 });
 
 // Init socket
@@ -66,37 +52,34 @@ io.on("connection", (socket) => {
   // Create game
   socket.on("createNewGame", (status) => {
     const uuid = v4();
-    const game = {
-      id: uuid,
-      status,
-      owner: id,
-      users: [id],
-    };
+    const gameRoom = new roomClass(uuid, status, id, [id]);
     socket.room = uuid;
     socket.join(uuid);
-    roomsList.push(game);
-    socket.emit("userCreateNewGame", game);
+    rooms.set(uuid, gameRoom);
+    socket.emit("createNewGameConfirmation", gameRoom);
     if (status === "public") {
-      io.emit("newGameCreate", game);
+      io.emit("newGameCreate", gameRoom);
     }
   });
 
   // User leave game
   socket.on("userLeaveRoom", (roomId) => {
-    const game = checkRoom(roomId, roomsList);
-    if (game) {
-      const isOwner = checkIsOwner(id, roomId, roomsList);
+    const gameRoom = rooms.get(roomId);
+    if (gameRoom) {
+      const isOwner = gameRoom.checkIsOwner(id);
       if (isOwner) {
-        removeAllUsersFromRoom(roomId, roomsList, usersList);
-        roomsList = deleteRoom(roomId, roomsList);
+        // If user is room owner, all users leave room and delete room
         io.to(roomId).emit("ownerLeaveRoom");
+        gameRoom.deleteAllUsers(usersList);
+        rooms.delete(roomId);
         io.emit("deleteRoom", roomId);
       } else {
+        // Else, remove user from room
         delete socket.room;
         socket.leave(roomId);
-        roomsList = removeOnUserFromRoom(id, roomId, roomsList);
+        gameRoom.deleteUser(id);
         io.to(roomId).emit("userLeaveCurrentGame", id);
-        io.emit("userLeaveGame", game);
+        io.emit("userLeaveGame", gameRoom);
       }
     }
   });
@@ -106,26 +89,54 @@ io.on("connection", (socket) => {
     if (socket.room) {
       return socket.emit("socketError", "User already in game");
     }
-    const game = checkRoom(roomId, roomsList);
-    if (!game) {
+    const gameRoom = rooms.get(roomId);
+    if (!gameRoom) {
       return socket.emit("socketError", "Game not found");
     }
-    if (game.users.length >= 2) {
+    if (gameRoom.users.length >= 2) {
       return socket.emit("socketError", "Game is full");
     }
     socket.room = roomId;
     socket.join(roomId);
-    addUserToRoom(id, roomId, roomsList);
-    socket.emit("joinGameSuccess", game);
+    gameRoom.addUser(id);
+    socket.emit("joinGameConfirmation", gameRoom);
     io.to(roomId).emit("userJoinCurrentGame", id);
-    io.emit("userJoinGame", game);
+    io.emit("userJoinGame", gameRoom);
+
+    const game = new gameClass();
+    gameRoom.initGame(game);
+    io.to(roomId).emit("startGame", game);
+  });
+
+  // Play
+  socket.on("userPlay", ({ index, symbol }) => {
+    const { room } = socket;
+    const game = rooms.get(room).game;
+    game.setMoove(index, symbol);
+    const isWin = game.checkWin(symbol);
+    if (isWin) {
+      game.setEndGame(symbol);
+      io.to(room).emit("endGame", game);
+    } else {
+      game.switchPlayer(symbol);
+      io.to(room).emit("updateGame", game);
+    }
+  });
+
+  // Play again
+  socket.on("playAgain", () => {
+    const { room } = socket;
+    const game = rooms.get(room).game;
+    game.reset();
+    io.to(room).emit("resetGame", game);
   });
 
   // User logoutuserJoinGame
   socket.on("disconnect", () => {
     io.emit("userLogout", id);
     if (socket.room) {
-      roomsList = removeOnUserFromRoom(id, socket.room, roomsList);
+      const gameRoom = rooms.get(socket.room);
+      gameRoom.deleteUser(id);
     }
     usersList = removeUser(id, usersList);
     console.log("Socket disconnected : " + id);
