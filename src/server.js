@@ -46,13 +46,18 @@ io.on("connection", (socket) => {
     }
     socket.username = user;
     usersList = [socket, ...usersList];
-    io.emit("userOnline", user);
+    io.emit("userOnline", { id, username: user });
   });
 
   // Create game
   socket.on("createNewGame", (status) => {
     const uuid = v4();
-    const gameRoom = new roomClass(uuid, status, id, [id]);
+    const gameRoom = new roomClass(
+      uuid,
+      status,
+      { id, username: socket.username },
+      [{ id, username: socket.username }]
+    );
     socket.room = uuid;
     socket.join(uuid);
     rooms.set(uuid, gameRoom);
@@ -96,11 +101,12 @@ io.on("connection", (socket) => {
     if (gameRoom.users.length >= 2) {
       return socket.emit("socketError", "Game is full");
     }
+    const newUser = { id, username: socket.username };
     socket.room = roomId;
     socket.join(roomId);
-    gameRoom.addUser(id);
+    gameRoom.addUser(newUser);
     socket.emit("joinGameConfirmation", gameRoom);
-    io.to(roomId).emit("userJoinCurrentGame", id);
+    io.to(roomId).emit("userJoinCurrentGame", newUser);
     io.emit("userJoinGame", gameRoom);
 
     const game = new gameClass();

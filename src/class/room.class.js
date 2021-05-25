@@ -8,7 +8,7 @@ class roomClass {
   }
 
   checkIsOwner(userId) {
-    return this.owner === userId;
+    return this.owner.id === userId;
   }
 
   addUser(userId) {
@@ -16,12 +16,12 @@ class roomClass {
   }
 
   deleteUser(userId) {
-    this.users = [...this.users.filter((i) => i !== userId)];
+    this.users = [...this.users.filter((i) => i.id !== userId)];
   }
 
   deleteAllUsers(usersList) {
     this.users.map((user) => {
-      const socket = usersList.find((i) => i.id === user);
+      const socket = usersList.find((i) => i.id === user.id);
       delete socket.room;
       socket.leave(this.id);
     });
