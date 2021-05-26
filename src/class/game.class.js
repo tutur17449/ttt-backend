@@ -48,10 +48,16 @@ class gameClass {
     );
   }
 
+  checkEnd() {
+    return this.board.every((state) => state !== null);
+  }
+
   setEndGame(symbol) {
     this.endGame = true;
     this.winner = symbol;
-    this.setScores(symbol);
+    if (symbol) {
+      this.setScores(symbol);
+    }
   }
 
   reset() {

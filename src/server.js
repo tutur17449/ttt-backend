@@ -124,8 +124,14 @@ io.on("connection", (socket) => {
       game.setEndGame(symbol);
       io.to(room).emit("endGame", game);
     } else {
-      game.switchPlayer(symbol);
-      io.to(room).emit("updateGame", game);
+      const isEnd = game.checkEnd();
+      if (isEnd) {
+        game.setEndGame(null);
+        io.to(room).emit("endGame", game);
+      } else {
+        game.switchPlayer(symbol);
+        io.to(room).emit("updateGame", game);
+      }
     }
   });
 
